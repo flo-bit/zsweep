@@ -416,21 +416,32 @@
 		class="animate-in fade-in slide-in-from-top-4 mb-0 flex w-full max-w-5xl items-center justify-between p-8 duration-500"
 	>
 		<div
-			class="flex select-none items-center gap-2 transition-colors duration-300 {gameState ===
-			'playing'
-				? 'opacity-50 grayscale'
-				: 'opacity-100'}"
+			class="flex items-center gap-4 transition-all duration-300
+    {gameState === 'playing' ? 'pointer-events-none opacity-0' : 'opacity-100'}"
 		>
-			<Bomb size={24} class={gameState === 'playing' ? 'text-sub' : 'text-main'} />
-			<h1
-				class="text-2xl font-bold tracking-tight {gameState === 'playing'
-					? 'text-sub'
-					: 'text-text'}"
-			>
-				zen<span class={gameState === 'playing' ? 'text-sub' : 'text-main'}>sweep</span>
-			</h1>
-		</div>
+			<a href="/" class="flex select-none items-center gap-2 transition-opacity hover:opacity-80">
+				<Bomb size={24} class="text-main" />
+				<h1 class="text-2xl font-bold tracking-tight text-text">
+					zen<span class="text-main">sweep</span>
+				</h1>
+			</a>
 
+			<a href="/about" class="text-sub transition-colors hover:text-text" title="About">
+				<svg
+					xmlns="http://www.w3.org/2000/svg"
+					width="20"
+					height="20"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+				>
+					<circle cx="12" cy="12" r="10" /><path d="M12 16v-4" /><path d="M12 8h.01" />
+				</svg>
+			</a>
+		</div>
 		<div
 			class="flex items-center gap-6 text-sm transition-opacity duration-300 {gameState ===
 			'playing'
