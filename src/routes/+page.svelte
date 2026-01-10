@@ -453,25 +453,19 @@
 		fullReset();
 	}
 
-	// --- FIXED SAVE LOGIC ---
-	async function saveResult(win: boolean) {
+async function saveResult(win: boolean) {
 		const {
 			data: { user }
 		} = await supabase.auth.getUser();
-		if (!user) return;
 
-		// 1. Calculate Time Taken
+
 		let timeTaken = 0;
 		if (gameMode === 'standard') {
-			// Standard counts UP from 0
 			timeTaken = timer;
 		} else {
-			// Time counts DOWN from Limit. 
-			// Time Taken = Limit - Remaining Time
 			timeTaken = timeLimit - timer;
 		}
 
-		// 2. Calculate Grids Solved
 		let gridsValue = 0;
 		if (gameMode === 'standard') {
 			gridsValue = win ? 1 : 0;
@@ -480,17 +474,20 @@
 		}
 
 		const settingLabel = gameMode === 'time' ? timeLimit.toString() : currentSize.label;
-		const minesValue = gameMode === 'time' ? gridsSolved * currentSize.mines : currentSize.mines;
 
-		await supabase.from('game_results').insert({
-			user_id: user.id,
+        // If user is null, we send 'null' or undefined for user_id.
+        // Supabase will treat this as an anonymous entry.
+		const { error } = await supabase.from('game_results').insert({
+			user_id: user ? user.id : null, // <--- Logic Change Here
 			mode: gameMode,
 			setting: settingLabel,
 			win: win,
-			time: timeTaken,   // New column
-			grids: gridsValue, // New column (renamed from score)
+			time: timeTaken,
+			grids: gridsValue,
 			accuracy: finalAccuracy
 		});
+        
+        if (error) console.error("Error saving result:", error);
 	}
 
 	onDestroy(() => clearInterval(timerInterval));
