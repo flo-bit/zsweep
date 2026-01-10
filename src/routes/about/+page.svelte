@@ -17,17 +17,20 @@
 		return n.toLocaleString();
 	};
 
-	const formatTime = (seconds: number) => {
+const formatTime = (seconds: number) => {
+		if (seconds < 60) return { val: seconds, unit: 'seconds' };
+		
 		const mins = seconds / 60;
 		const hours = seconds / 3600;
 		const days = seconds / 86400;
 		const years = seconds / 31536000;
 
-		if (years >= 1) return `${years.toFixed(1)} years`;
-		if (days >= 1) return `${days.toFixed(1)} days`;
-		if (hours >= 1) return `${Math.floor(hours)} hours`;
-		return `${Math.floor(mins)} minutes`;
+		if (years >= 1) return { val: years.toFixed(1), unit: 'years' };
+		if (days >= 1) return { val: days.toFixed(1), unit: 'days' };
+		if (hours >= 1) return { val: Math.floor(hours), unit: 'hours' };
+		return { val: Math.floor(mins), unit: 'minutes' };
 	};
+    let timeObj = formatTime(data.stats.seconds);
 
 	// --- AUTH LOGIC ---
 	onMount(async () => {
@@ -98,17 +101,21 @@
 
 	<div class="animate-in fade-in w-full max-w-4xl duration-700">
 		
-		<div class="mb-24 grid grid-cols-1 gap-12 text-center md:grid-cols-3">
+<div class="mb-24 grid grid-cols-1 gap-12 text-center md:grid-cols-3">
 			<div class="flex flex-col gap-1">
-				<span class="text-xs font-bold uppercase tracking-widest text-sub">total sweeps started</span>
+				<span class="text-xs font-bold uppercase tracking-widest text-sub">total boards started</span>
 				<span class="text-5xl font-bold text-text">{fmtCount(data.stats.started)}</span>
 			</div>
-			<div class="flex flex-col gap-1">
-				<span class="text-xs font-bold uppercase tracking-widest text-sub">total time sweeping</span>
-				<span class="text-5xl font-bold text-text">{formatTime(data.stats.seconds)}</span>
+            <div class="flex flex-col gap-1 items-center">
+				<span class="text-xs font-bold uppercase tracking-widest text-sub mb-2">total time sweeping</span>
+				
+				<div class="flex flex-col items-center leading-none">
+					<span class="text-6xl font-bold text-text">{timeObj.val}</span>
+					<span class="text-3xl font-medium text-text mt-1">{timeObj.unit}</span>
+				</div>
 			</div>
 			<div class="flex flex-col gap-1">
-				<span class="text-xs font-bold uppercase tracking-widest text-sub">total sweeps completed</span>
+				<span class="text-xs font-bold uppercase tracking-widest text-sub">total boards completed</span>
 				<span class="text-5xl font-bold text-text">{fmtCount(data.stats.completed)}</span>
 			</div>
 		</div>
