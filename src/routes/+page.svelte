@@ -10,67 +10,62 @@
 	import { onMount, onDestroy } from 'svelte';
 	import confetti from 'canvas-confetti';
 	import {
-		Flag,
-		Bomb,
-		Grid3x3,
-		Wrench,
-		Flame,
-		Flower2,
-		User,
-		LogOut,
-		Clock,
-		Hourglass,
-		Infinity as InfinityIcon,
-		Palette,
-		Search,
-		ChevronRight
+		Flag, Bomb, Grid3x3, Wrench, Flame, Flower2, User,
+		LogOut, Clock, Hourglass, Infinity as InfinityIcon,
+		Palette, Search, ChevronRight
 	} from 'lucide-svelte';
 	import ResultView from '$lib/components/ResultView.svelte';
 	import { supabase } from '$lib/supabase';
 	import { THEMES } from '$lib/themes';
 	import { currentTheme } from '$lib/themeStore';
 	import { base } from '$app/paths';
+	import { handleVimKey } from '$lib/game/input/vim';
 
+	// --- CONFIG ---
 	const GRID_SIZES = [
 		{ label: '9x9', rows: 9, cols: 9, mines: 10 },
 		{ label: '16x16', rows: 16, cols: 16, mines: 40 },
 		{ label: '30x16', rows: 16, cols: 30, mines: 99 }
 	];
-
 	const TIME_OPTIONS = [15, 30, 60, 120];
 
-	// --- SETTINGS ---
+	// --- STATE ---
 	let gameMode: 'time' | 'standard' = 'time';
 	let currentSize = GRID_SIZES[0];
 	let timeLimit = 15;
 	let customTime = 60;
 	let isCustomTime = false;
+	
+	// --- VIM ---
+	let cursor = { r: 0, c: 0 };
+    let vimBuffer = '';
+    let lastKey = '';
+    let lastKeyTime = 0;
+    let isSearchMode = false;
+    let searchTerm = '';
+    let searchMatches: {r: number, c: number}[] = [];
+    let matchIndex = -1;
 
-	// --- COMMAND PALETTE STATE ---
 	let showPalette = false;
 	let paletteView: 'root' | 'themes' = 'root';
 	let searchQuery = '';
 	let searchInputEl: HTMLInputElement;
 
-	// --- GAME STATE ---
 	let grid: Cell[][] = [];
 	let gameState: 'pending' | 'playing' | 'finished' = 'pending';
 	let isFirstClick = true;
 	let timer = 0;
 	let timerInterval: ReturnType<typeof setInterval> | undefined;
 
-	// --- STATS ---
 	let minesLeft = 0;
 	let totalClicks = 0;
 	let clickHistory: number[] = [];
 	let clicksThisSecond = 0;
 
-	// New 3BV Variables
+	// Stats
 	let session3BV = 0;
 	let currentGrid3BV = 0;
-	// Track Win/Loss State for UI
 	let isWin = false;
-
 	let gridsSolved = 0;
 	let gridsPlayed = 0;
 	let totalCellsRevealed = 0;
@@ -79,7 +74,6 @@
 	let finalAccuracy = 0;
 
 	let isMouseDown = false;
-	let hoveredCell: { r: number; c: number } | null = null;
 	let currentUser: string | null = null;
 
 	$: StatusIcon = (() => {
@@ -88,7 +82,6 @@
 		return Bomb;
 	})();
 
-	// --- FILTERING LOGIC ---
 	$: filteredThemes = THEMES.filter((t) =>
 		t.label.toLowerCase().includes(searchQuery.toLowerCase())
 	);
@@ -110,7 +103,8 @@
 		c.label.toLowerCase().includes(searchQuery.toLowerCase())
 	);
 
-	// --- ACTIONS ---
+	// --- CORE FUNCTIONS ---
+
 	function openPalette() {
 		showPalette = true;
 		paletteView = 'root';
@@ -137,62 +131,6 @@
 		fullReset();
 	}
 
-	function countCurrentSafeOpen() {
-		let count = 0;
-		for (let row of grid) {
-			for (let cell of row) {
-				if (cell.isOpen && !cell.isMine) count++;
-			}
-		}
-		return count;
-	}
-
-	function countWrongFlags() {
-		let wrong = 0;
-		for (let row of grid) {
-			for (let cell of row) {
-				if (cell.isFlagged && !cell.isMine) wrong++;
-			}
-		}
-		return wrong;
-	}
-
-	function calculateAccuracy() {
-		if (sessionTotalMines === 0) return 0;
-		const rawAcc = ((sessionTotalMines - sessionErrors) / sessionTotalMines) * 100;
-		return Math.max(0, Math.round(rawAcc));
-	}
-
-	// --- CONFETTI EFFECTS ---
-	function triggerExplosion() {
-		const colors = ['#ef4444', '#dc2626', '#b91c1c', '#000000'];
-		confetti({
-			particleCount: 150,
-			spread: 100,
-			origin: { y: 0.6 },
-			colors: colors,
-			disableForReducedMotion: true,
-			gravity: 1.2,
-			scalar: 1.2,
-			drift: 0,
-			ticks: 200
-		});
-	}
-
-	function triggerWin() {
-		const colors = ['#10b981', '#34d399', '#f59e0b', '#fbbf24']; // Green & Gold
-		confetti({
-			particleCount: 200,
-			spread: 120,
-			origin: { y: 0.6 },
-			colors: colors,
-			disableForReducedMotion: true,
-			gravity: 1.0,
-			decay: 0.9,
-			ticks: 300
-		});
-	}
-
 	function fullReset() {
 		gameState = 'pending';
 		gridsSolved = 0;
@@ -203,9 +141,7 @@
 		sessionErrors = 0;
 		finalAccuracy = 0;
 		isWin = false;
-
 		session3BV = 0;
-
 		clickHistory = [];
 		clicksThisSecond = 0;
 		timer = gameMode === 'time' ? timeLimit : 0;
@@ -217,6 +153,11 @@
 		isFirstClick = true;
 		grid = createGrid(currentSize.rows, currentSize.cols);
 		minesLeft = currentSize.mines;
+		// Reset cursor to center
+		cursor = { 
+			r: Math.floor(currentSize.rows / 2), 
+			c: Math.floor(currentSize.cols / 2) 
+		};
 	}
 
 	function startSession() {
@@ -224,20 +165,14 @@
 		gameState = 'playing';
 
 		timerInterval = setInterval(() => {
-			if (gameMode === 'time') {
-				timer--;
-			} else {
-				timer++;
-			}
+			if (gameMode === 'time') timer--;
+			else timer++;
 
-			// Push stats for graph
 			clickHistory.push(clicksThisSecond);
 			clickHistory = clickHistory;
 			clicksThisSecond = 0;
 
-			// Check Time Attack Expiration
 			if (gameMode === 'time' && timer <= 0) {
-				// Success: Time ran out, run is complete
 				finishSession(true);
 			}
 		}, 1000);
@@ -247,44 +182,42 @@
 		gameState = 'finished';
 		isWin = win;
 		clearInterval(timerInterval);
-
 		if (clicksThisSecond > 0) clickHistory.push(clicksThisSecond);
-
-		// Final stat collection
+		
+		// Stat calculations...
 		if (gameMode === 'standard') {
-			// In standard, ending the session (win) means we finished 1 grid
 			gridsPlayed = 1;
-			sessionTotalMines = currentSize.mines; // Ensure we count mines for accuracy
-			if (win) {
-				// If we won standard, all safe cells are revealed
-				totalCellsRevealed = currentSize.rows * currentSize.cols - currentSize.mines;
-			} else {
-				// If we lost, count what we managed to open
-				totalCellsRevealed = countCurrentSafeOpen();
-			}
+			sessionTotalMines = currentSize.mines;
+			totalCellsRevealed = win 
+				? (currentSize.rows * currentSize.cols - currentSize.mines) 
+				: countCurrentSafeOpen();
 		} else {
-			// Time Mode:
-			// We only count the current partial board if we "Won" (Time ran out)
-			// If we "Lost" (Exploded), the current board is invalid for stats
 			if (win) {
 				totalCellsRevealed += countCurrentSafeOpen();
-				// Add mines from the current partial board for accuracy calc
 				sessionTotalMines += currentSize.mines;
-				// Time mode counts partially played grids as played
 				gridsPlayed++;
 			}
 		}
 
-		// Final Error check
-		if (!win) {
-			sessionErrors += countWrongFlags();
-		}
-
+		if (!win) sessionErrors += countWrongFlags();
 		finalAccuracy = calculateAccuracy();
-		grid = [...grid]; // Force refresh
-
+		grid = [...grid];
 		if (win) triggerWin();
 		saveResult(win);
+	}
+
+	// --- GAMEPLAY ACTIONS ---
+
+	function performClick(r: number, c: number) {
+		if (gameState === 'finished') return;
+		// Standard reveal
+		if (!grid[r][c].isOpen && !grid[r][c].isFlagged) {
+			handleClick(r, c);
+		}
+		// Chord if already open
+		else if (grid[r][c].isOpen && grid[r][c].neighborCount > 0) {
+			attemptChord(r, c);
+		}
 	}
 
 	function handleClick(r: number, c: number) {
@@ -298,13 +231,8 @@
 			isFirstClick = false;
 			if (gameState === 'pending') startSession();
 			placeMines(grid, currentSize.mines, { r, c });
-
 			currentGrid3BV = calculate3BV(grid);
-
-			if (gameMode === 'standard') {
-				session3BV = currentGrid3BV;
-			}
-
+			if (gameMode === 'standard') session3BV = currentGrid3BV;
 			grid = [...grid];
 		}
 
@@ -313,7 +241,6 @@
 
 		if (result.gameOver) {
 			triggerExplosion();
-			// Immediate penalty for hitting a mine
 			sessionErrors += 1;
 			sessionErrors += countWrongFlags();
 			finishSession(false);
@@ -326,22 +253,216 @@
 		if (gameState === 'finished') return;
 		if (!grid[r][c].isOpen) {
 			grid[r][c].isFlagged = !grid[r][c].isFlagged;
-			if (grid[r][c].isFlagged) minesLeft--;
-			else minesLeft++;
+			minesLeft += grid[r][c].isFlagged ? -1 : 1;
 			totalClicks++;
 			clicksThisSecond++;
-			grid = grid;
+			grid = grid; // trigger update
 		}
 	}
 
+	function attemptChord(r: number, c: number) {
+		const cell = grid[r][c];
+		let flagCount = 0;
+		DIRECTIONS.forEach(([dr, dc]) => {
+			const nr = r + dr, nc = c + dc;
+			if (grid[nr]?.[nc]?.isFlagged) flagCount++;
+		});
+
+		if (flagCount === cell.neighborCount) {
+			totalClicks++;
+			clicksThisSecond++;
+			DIRECTIONS.forEach(([dr, dc]) => {
+				const nr = r + dr, nc = c + dc;
+				const neighbor = grid[nr]?.[nc];
+				if (neighbor && !neighbor.isOpen && !neighbor.isFlagged) {
+					handleClick(nr, nc);
+				}
+			});
+		}
+	}
+
+function handleInput(e: KeyboardEvent) {
+		// 1. Palette logic (Highest Priority)
+		if (showPalette) {
+			if (e.key === 'Escape') {
+				if (paletteView === 'themes') { paletteView = 'root'; searchQuery = ''; }
+				else showPalette = false;
+			}
+			return;
+		}
+
+		// 2. SEARCH MODE INTERCEPTION (Trap inputs when typing query)
+		if (isSearchMode) {
+			e.preventDefault();
+			
+			if (e.key === 'Escape') {
+				isSearchMode = false;
+				searchTerm = '';
+			}
+			else if (e.key === 'Enter') {
+				executeSearch();
+				isSearchMode = false;
+			}
+			else if (e.key === 'Backspace') {
+				searchTerm = searchTerm.slice(0, -1);
+			}
+			else if (/^[0-8]$/.test(e.key)) {
+				searchTerm = e.key; // Single digit search is usually enough, overwrites previous
+			}
+			return;
+		}
+
+		// 3. Normal Game Input Checks
+		const activeEl = document.activeElement;
+		if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) return;
+		if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+		if (e.key === 'Tab') { e.preventDefault(); fullReset(); return; }
+		if (e.key === 'Escape') {
+			e.preventDefault();
+			if (vimBuffer.length > 0) vimBuffer = '';
+			else if (gameState === 'playing') finishSession(true);
+			else openPalette();
+			return;
+		}
+
+		// --- gg LOGIC ---
+		const now = Date.now();
+		if (e.key === 'g' && lastKey === 'g' && (now - lastKeyTime < 500)) {
+			cursor = { r: 0, c: cursor.c }; lastKey = ''; vimBuffer = ''; return;
+		}
+		if (e.key === 'g') { lastKey = 'g'; lastKeyTime = now; return; }
+
+		// --- MAIN HANDLER ---
+		const action = handleVimKey(e.key);
+
+		if (action) {
+			e.preventDefault();
+			
+			if (action.type === 'START_SEARCH') {
+				isSearchMode = true;
+				searchTerm = '';
+				return;
+			}
+
+			if (action.type === 'NEXT_MATCH') {
+				if (searchMatches.length === 0) return;
+				matchIndex = (matchIndex + 1) % searchMatches.length;
+				cursor = searchMatches[matchIndex];
+				return;
+			}
+
+			if (action.type === 'PREV_MATCH') {
+				if (searchMatches.length === 0) return;
+				// Wrap around backwards
+				matchIndex = (matchIndex - 1 + searchMatches.length) % searchMatches.length;
+				cursor = searchMatches[matchIndex];
+				return;
+			}
+
+			// ... [EXISTING VIM LOGIC BELOW UNCHANGED] ...
+			if (action.type === 'DIGIT') { vimBuffer += action.value; return; }
+			if (action.type === 'ZERO') {
+				if (vimBuffer.length > 0) vimBuffer += '0';
+				else cursor = { r: cursor.r, c: 0 };
+				return;
+			}
+			
+			// Simple Actions
+			if (action.type === 'START_ROW') { cursor = { r: cursor.r, c: 0 }; vimBuffer = ''; return; }
+			if (action.type === 'GO_BOTTOM') { cursor = { r: currentSize.rows - 1, c: cursor.c }; vimBuffer = ''; return; }
+
+			// Buffered Actions
+			const multiplier = vimBuffer.length > 0 ? parseInt(vimBuffer) : 1;
+			
+			if (action.type === 'MOVE_CURSOR') {
+				const newR = Math.max(0, Math.min(currentSize.rows - 1, cursor.r + (action.dy * multiplier)));
+				const newC = Math.max(0, Math.min(currentSize.cols - 1, cursor.c + (action.dx * multiplier)));
+				cursor = { r: newR, c: newC };
+				vimBuffer = '';
+			}
+			else if (action.type === 'NEXT_UNREVEALED') {
+				let steps = multiplier;
+				let currentC = cursor.c;
+				while (steps > 0 && currentC < currentSize.cols - 1) {
+					currentC++;
+					if (!grid[cursor.r][currentC].isOpen) steps--;
+				}
+				cursor = { r: cursor.r, c: currentC };
+				vimBuffer = '';
+			}
+			else if (action.type === 'PREV_UNREVEALED') {
+				let steps = multiplier;
+				let currentC = cursor.c;
+				while (steps > 0 && currentC > 0) {
+					currentC--;
+					if (!grid[cursor.r][currentC].isOpen) steps--;
+				}
+				cursor = { r: cursor.r, c: currentC };
+				vimBuffer = '';
+			}
+			else if (action.type === 'FLAG') { toggleFlag(cursor.r, cursor.c); vimBuffer = ''; }
+			else if (action.type === 'REVEAL') { handleClick(cursor.r, cursor.c); vimBuffer = ''; }
+			else if (action.type === 'SMART') {
+				const cell = grid[cursor.r][cursor.c];
+				if (!cell.isOpen) toggleFlag(cursor.r, cursor.c);
+				else attemptChord(cursor.r, cursor.c);
+				vimBuffer = '';
+			}
+		}
+	}
+
+    function executeSearch() {
+		if (!searchTerm) return;
+		const targetVal = parseInt(searchTerm);
+		
+		searchMatches = [];
+		
+		for (let r = 0; r < currentSize.rows; r++) {
+			for (let c = 0; c < currentSize.cols; c++) {
+				const cell = grid[r][c];
+				
+				// UPDATE: Special handling for 0
+				if (targetVal === 0) {
+					// 0 = Search for Unrevealed Cells (Closed)
+					if (!cell.isOpen) {
+						searchMatches.push({ r, c });
+					}
+				} else {
+					// 1-8 = Search for Open Cells with that number
+					if (cell.isOpen && cell.neighborCount === targetVal) {
+						searchMatches.push({ r, c });
+					}
+				}
+			}
+		}
+		
+		if (searchMatches.length > 0) {
+			matchIndex = searchMatches.findIndex(m => (m.r > cursor.r) || (m.r === cursor.r && m.c >= cursor.c));
+			if (matchIndex === -1) matchIndex = 0;
+			cursor = searchMatches[matchIndex];
+		}
+	}
+
+	function countCurrentSafeOpen() {
+		let count = 0;
+		for (let row of grid) for (let cell of row) if (cell.isOpen && !cell.isMine) count++;
+		return count;
+	}
+	function countWrongFlags() {
+		let wrong = 0;
+		for (let row of grid) for (let cell of row) if (cell.isFlagged && !cell.isMine) wrong++;
+		return wrong;
+	}
+	function calculateAccuracy() {
+		if (sessionTotalMines === 0) return 0;
+		return Math.max(0, Math.round(((sessionTotalMines - sessionErrors) / sessionTotalMines) * 100));
+	}
 	function checkWin() {
 		let safeCellsOpen = 0;
 		const totalSafeCells = currentSize.rows * currentSize.cols - currentSize.mines;
-		for (let row of grid) {
-			for (let cell of row) {
-				if (cell.isOpen && !cell.isMine) safeCellsOpen++;
-			}
-		}
+		for (let row of grid) for (let cell of row) if (cell.isOpen && !cell.isMine) safeCellsOpen++;
+		
 		if (safeCellsOpen === totalSafeCells) {
 			if (gameMode === 'time') {
 				gridsSolved++;
@@ -350,7 +471,6 @@
 				totalCellsRevealed += totalSafeCells;
 				sessionTotalMines += currentSize.mines;
 				sessionErrors += countWrongFlags();
-
 				resetBoard();
 			} else {
 				gridsSolved = 1;
@@ -359,92 +479,18 @@
 		}
 	}
 
-	function handleInput(e: KeyboardEvent) {
-		if (showPalette) {
-			if (e.key === 'Escape') {
-				if (paletteView === 'themes') {
-					paletteView = 'root';
-					searchQuery = '';
-				} else {
-					showPalette = false;
-				}
-			}
-			return;
-		}
-
-		if (e.key === 'Tab') {
-			const active = document.activeElement;
-			if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
-			e.preventDefault();
-			fullReset();
-			return;
-		}
-
-		if (e.key === 'Escape') {
-			e.preventDefault();
-			if (gameState === 'playing') {
-				finishSession(true);
-			} else {
-				openPalette();
-			}
-			return;
-		}
-
-		if (e.code === 'Space') {
-			e.preventDefault();
-			if (hoveredCell) {
-				const { r, c } = hoveredCell;
-				const cell = grid[r][c];
-				if (!cell.isOpen) toggleFlag(r, c);
-				else if (cell.neighborCount > 0) attemptChord(r, c);
-			}
-		}
+	// --- SUPABASE & EFFECTS ---
+	function triggerExplosion() {
+		confetti({ particleCount: 150, spread: 100, origin: { y: 0.6 }, colors: ['#ef4444', '#dc2626', '#b91c1c'], disableForReducedMotion: true });
 	}
-
-	function attemptChord(r: number, c: number) {
-		const cell = grid[r][c];
-		let flagCount = 0;
-		DIRECTIONS.forEach(([dr, dc]) => {
-			const nr = r + dr,
-				nc = c + dc;
-			if (grid[nr] && grid[nr][nc] && grid[nr][nc].isFlagged) flagCount++;
-		});
-
-		if (flagCount === cell.neighborCount) {
-			totalClicks++;
-			clicksThisSecond++;
-			DIRECTIONS.forEach(([dr, dc]) => {
-				const nr = r + dr,
-					nc = c + dc;
-				const neighbor = grid[nr]?.[nc];
-
-				if (neighbor && !neighbor.isOpen && !neighbor.isFlagged) {
-					handleClick(nr, nc);
-				}
-			});
-		}
+	function triggerWin() {
+		confetti({ particleCount: 200, spread: 120, origin: { y: 0.6 }, colors: ['#10b981', '#34d399', '#f59e0b'], disableForReducedMotion: true });
 	}
 
 	onMount(async () => {
-		const {
-			data: { session }
-		} = await supabase.auth.getSession();
-		if (session?.user) {
-			currentUser = session.user.user_metadata.full_name || session.user.email?.split('@')[0];
-		}
-		const {
-			data: { subscription }
-		} = supabase.auth.onAuthStateChange((_event, session) => {
-			if (session?.user) {
-				currentUser = session.user.user_metadata.full_name || session.user.email?.split('@')[0];
-			} else {
-				currentUser = null;
-			}
-		});
+		const { data: { session } } = await supabase.auth.getSession();
+		if (session?.user) currentUser = session.user.user_metadata.full_name || session.user.email?.split('@')[0];
 		fullReset();
-		return () => {
-			subscription.unsubscribe();
-		};
 	});
 
 	async function handleLogout() {
@@ -454,254 +500,86 @@
 	}
 
 	async function saveResult(win: boolean) {
-		const {
-			data: { user }
-		} = await supabase.auth.getUser();
+		const { data: { user } } = await supabase.auth.getUser();
+		let timeTaken = gameMode === 'standard' ? timer : Math.max(0, timeLimit - timer);
+		let gridsValue = gameMode === 'standard' ? (win ? 1 : 0) : gridsSolved;
+		let minesSwept = win 
+			? (gameMode === 'standard' ? currentSize.mines : gridsSolved * currentSize.mines)
+			: 0;
 
-		// 1. Calculate Time Taken
-		let timeTaken = 0;
-		if (gameMode === 'standard') {
-			timeTaken = timer; // Standard counts UP
-		} else {
-			// Time mode counts DOWN, so (Limit - Current) = Time Passed
-			timeTaken = timeLimit - timer;
-			if (timeTaken < 0) timeTaken = 0;
-		}
-
-		// 2. Calculate Grids Solved
-		let gridsValue = 0;
-		if (gameMode === 'standard') {
-			gridsValue = win ? 1 : 0;
-		} else {
-			gridsValue = gridsSolved;
-		}
-
-		// 3. NEW: Calculate Total Mines Swept
-		// We calculate this right now so the Profile page has a number to sum up later.
-		let minesSwept = 0;
-		if (win) {
-			if (gameMode === 'standard') {
-				// In Standard, if you win, you swept ALL mines on that board
-				minesSwept = currentSize.mines;
-			} else {
-				// In Time Attack, you swept (Grids Solved * Mines Per Grid)
-				minesSwept = gridsSolved * currentSize.mines;
-			}
-		}
-
-		const settingLabel = gameMode === 'time' ? timeLimit.toString() : currentSize.label;
-
-		// 4. Insert into Database
 		const { error } = await supabase.from('game_results').insert({
 			user_id: user ? user.id : null,
 			mode: gameMode,
-			setting: settingLabel,
-			win: win,
+			setting: gameMode === 'time' ? timeLimit.toString() : currentSize.label,
+			win,
 			time: timeTaken,
 			grids: gridsValue,
-			total_mines: minesSwept, // <--- THIS is what fixes the NaN
+			total_mines: minesSwept,
 			accuracy: finalAccuracy
 		});
-
 		if (error) console.error('Error saving result:', error);
 	}
-
-	onDestroy(() => clearInterval(timerInterval));
 </script>
 
 <svelte:window on:keydown={handleInput} on:mouseup={() => (isMouseDown = false)} />
 
-<div
-	class="relative flex min-h-screen flex-col items-center bg-bg font-mono text-text transition-colors duration-300"
->
-	<div
-		class="animate-in fade-in slide-in-from-top-4 mb-0 flex w-full max-w-5xl items-center justify-between p-8 duration-500"
-	>
+<div class="relative flex min-h-screen flex-col items-center bg-bg font-mono text-text transition-colors duration-300">
+	<div class="animate-in fade-in slide-in-from-top-4 mb-0 flex w-full max-w-5xl items-center justify-between p-8 duration-500">
 		<div class="flex items-center gap-4 transition-all duration-300">
-			<a
-				href="{base}/about"
-				class="group flex select-none items-center gap-3 transition-all
-				{gameState === 'playing' ? 'pointer-events-none opacity-50 grayscale' : 'hover:opacity-80'}"
-			>
-				<Bomb
-					size={28}
-					strokeWidth={2.5}
-					class="transition-transform duration-300 group-hover:scale-110
-					{gameState === 'playing' ? 'text-sub' : 'text-main'}"
-				/>
+			<a href="{base}/about" class="group flex select-none items-center gap-3 transition-all {gameState === 'playing' ? 'pointer-events-none opacity-50 grayscale' : 'hover:opacity-80'}">
+				<Bomb size={28} strokeWidth={2.5} class="transition-transform duration-300 group-hover:scale-110 {gameState === 'playing' ? 'text-sub' : 'text-main'}" />
 				<h1 class="font-mono text-3xl font-black leading-none tracking-tighter text-text">
 					z<span class={gameState === 'playing' ? 'text-text' : 'text-main'}>sweep</span>
 				</h1>
 			</a>
-
-			<a
-				href="{base}/about"
-				class="text-sub transition-all duration-300 hover:text-text
-				{gameState === 'playing' ? 'pointer-events-none opacity-0' : 'opacity-100'}"
-				title="About"
-			>
-				<svg
-					xmlns="http://www.w3.org/2000/svg"
-					width="20"
-					height="20"
-					viewBox="0 0 24 24"
-					fill="none"
-					stroke="currentColor"
-					stroke-width="2"
-					stroke-linecap="round"
-					stroke-linejoin="round"
-					><circle cx="12" cy="12" r="10" /><path d="M12 16v-4" /><path d="M12 8h.01" /></svg
-				>
-			</a>
 		</div>
-		<div
-			class="flex items-center gap-6 text-sm transition-opacity duration-300
-			{gameState === 'playing' ? 'pointer-events-none opacity-0' : 'opacity-100'}"
-		>
+		<div class="flex items-center gap-6 text-sm transition-opacity duration-300 {gameState === 'playing' ? 'pointer-events-none opacity-0' : 'opacity-100'}">
 			{#if currentUser}
 				<div class="group relative z-20">
-					<button
-						class="flex items-center gap-2 rounded px-3 py-1.5 text-main transition-all hover:bg-sub/10"
-					>
-						<User size={16} />
-						<span class="font-bold">{currentUser}</span>
+					<button class="flex items-center gap-2 rounded px-3 py-1.5 text-main transition-all hover:bg-sub/10">
+						<User size={16} /><span class="font-bold">{currentUser}</span>
 					</button>
-
-					<div
-						class="invisible absolute right-0 top-full pt-2 opacity-0 transition-all duration-200 group-hover:visible group-hover:opacity-100"
-					>
-						<div
-							class="flex min-w-[160px] flex-col rounded border border-sub/20 bg-bg p-1 font-mono text-sm shadow-xl"
-						>
-							<a
-								href="{base}/profile"
-								class="flex items-center gap-2 rounded px-3 py-2 text-sub transition-colors hover:bg-sub/10 hover:text-text"
-							>
-								<User size={14} />
-								<span>Profile</span>
+					<div class="invisible absolute right-0 top-full pt-2 opacity-0 transition-all duration-200 group-hover:visible group-hover:opacity-100">
+						<div class="flex min-w-[160px] flex-col rounded border border-sub/20 bg-bg p-1 font-mono text-sm shadow-xl">
+							<a href="{base}/profile" class="flex items-center gap-2 rounded px-3 py-2 text-sub transition-colors hover:bg-sub/10 hover:text-text">
+								<User size={14} /><span>Profile</span>
 							</a>
-
-							<button
-								class="flex w-full cursor-not-allowed items-center gap-2 rounded px-3 py-2 text-left text-sub opacity-50 transition-colors hover:bg-sub/10 hover:text-text"
-							>
-								<svg
-									xmlns="http://www.w3.org/2000/svg"
-									width="14"
-									height="14"
-									viewBox="0 0 24 24"
-									fill="none"
-									stroke="currentColor"
-									stroke-width="2"
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle
-										cx="9"
-										cy="7"
-										r="4"
-									/><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path
-										d="M16 3.13a4 4 0 0 1 0 7.75"
-									/></svg
-								>
-								<span>Friends</span>
-							</button>
-
 							<div class="my-1 h-[1px] bg-sub/10"></div>
-
-							<button
-								on:click={handleLogout}
-								class="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sub transition-colors hover:bg-error/10 hover:text-error"
-							>
-								<LogOut size={14} />
-								<span>Sign Out</span>
+							<button on:click={handleLogout} class="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sub transition-colors hover:bg-error/10 hover:text-error">
+								<LogOut size={14} /><span>Sign Out</span>
 							</button>
 						</div>
 					</div>
 				</div>
 			{:else}
-				<a
-					href="/login"
-					class="flex h-8 w-8 items-center justify-center rounded text-sub transition-colors hover:bg-sub/10 hover:text-text"
-					><User size={18} /></a
-				>
+				<a href="/login" class="flex h-8 w-8 items-center justify-center rounded text-sub hover:bg-sub/10 hover:text-text"><User size={18} /></a>
 			{/if}
 		</div>
 	</div>
 
 	{#if gameState === 'finished'}
-		<ResultView
-			win={isWin}
-			time={gameMode === 'time' ? timeLimit - timer : timer}
-			cells={totalCellsRevealed}
-			{totalClicks}
-			history={clickHistory}
-			accuracy={finalAccuracy}
-			sizeLabel={currentSize.label}
-			{gridsSolved}
-			{gridsPlayed}
-			mode={gameMode}
-			total3BV={session3BV}
-			on:restart={fullReset}
+		<ResultView 
+			win={isWin} time={gameMode === 'time' ? timeLimit - timer : timer} cells={totalCellsRevealed}
+			{totalClicks} history={clickHistory} accuracy={finalAccuracy} sizeLabel={currentSize.label}
+			{gridsSolved} {gridsPlayed} mode={gameMode} total3BV={session3BV} on:restart={fullReset}
 		/>
 	{:else}
-		<div
-			class="mb-8 flex select-none items-center gap-6 rounded-lg bg-sub/10 px-4 py-2 text-xs transition-all duration-300 hover:bg-sub/15 {gameState ===
-			'playing'
-				? 'pointer-events-none opacity-0'
-				: 'opacity-100'}"
-		>
+		<div class="mb-8 flex select-none items-center gap-6 rounded-lg bg-sub/10 px-4 py-2 text-xs transition-all duration-300 {gameState === 'playing' ? 'pointer-events-none opacity-0' : 'opacity-100'}">
 			<div class="flex items-center gap-3">
-				<button
-					class="flex items-center gap-2 transition-colors {gameMode === 'time'
-						? 'font-bold text-main'
-						: 'text-sub hover:text-text'}"
-					on:click={() => setMode('time')}
-				>
+				<button class="flex items-center gap-2 transition-colors {gameMode === 'time' ? 'font-bold text-main' : 'text-sub'}" on:click={() => setMode('time')}>
 					<Hourglass size={12} /><span>time</span>
 				</button>
-				<button
-					class="flex items-center gap-2 transition-colors {gameMode === 'standard'
-						? 'font-bold text-main'
-						: 'text-sub hover:text-text'}"
-					on:click={() => setMode('standard')}
-				>
+				<button class="flex items-center gap-2 transition-colors {gameMode === 'standard' ? 'font-bold text-main' : 'text-sub'}" on:click={() => setMode('standard')}>
 					<InfinityIcon size={12} /><span>standard</span>
 				</button>
 			</div>
 			<div class="h-3 w-[1px] bg-sub/20"></div>
-			{#if gameMode === 'time'}
-				<div class="flex items-center gap-3">
-					<Clock size={12} class="text-sub opacity-50" />
-					{#each TIME_OPTIONS as t}
-						<button
-							class="transition-colors duration-200 {timeLimit === t && !isCustomTime
-								? 'font-bold text-main'
-								: 'text-sub hover:text-text'}"
-							on:click={() => setTime(t)}>{t}</button
-						>
-					{/each}
-					<button
-						class="transition-colors duration-200 {isCustomTime
-							? 'text-main'
-							: 'text-sub hover:text-text'}"
-						on:click={setCustomTime}><Wrench size={12} /></button
-					>
-				</div>
-				<div class="h-3 w-[1px] bg-sub/20"></div>
-			{/if}
 			<div class="flex items-center gap-3">
 				<Grid3x3 size={12} class="text-sub opacity-50" />
 				{#each GRID_SIZES as size}
-					<button
-						class="transition-colors duration-200 {currentSize.label === size.label
-							? 'font-bold text-main'
-							: 'text-sub hover:text-text'}"
-						on:click={() => setSize(size)}>{size.label}</button
-					>
+					<button class="{currentSize.label === size.label ? 'font-bold text-main' : 'text-sub hover:text-text'}" on:click={() => setSize(size)}>{size.label}</button>
 				{/each}
-				<button
-					class="text-sub transition-colors duration-200 hover:text-text"
-					on:click={openPalette}><Wrench size={12} /></button
-				>
+				<button class="text-sub hover:text-text" on:click={openPalette}><Wrench size={12} /></button>
 			</div>
 		</div>
 
@@ -711,25 +589,15 @@
 					<span class="text-[10px] font-bold uppercase text-sub opacity-50">time</span>
 					<span class="text-3xl font-bold leading-none text-main">{timer}</span>
 				</div>
-				{#if gameMode === 'time'}
-					<div class="flex flex-col items-center opacity-50">
-						<span class="text-[10px] font-bold uppercase">solved</span>
-						<span class="text-xl font-bold">{gridsSolved}/{gridsPlayed}</span>
-					</div>
-				{/if}
 				<div class="flex w-12 flex-col text-right">
 					<span class="text-[10px] font-bold uppercase text-sub opacity-50">mines</span>
 					<span class="text-3xl font-bold leading-none">{minesLeft}</span>
 				</div>
 			</div>
 
-			<div
-				class="grid select-none gap-1 bg-bg transition-all duration-300 ease-in-out"
+			<div class="grid select-none gap-1 bg-bg transition-all duration-300"
 				style="grid-template-columns: repeat({currentSize.cols}, minmax(0, 1fr));"
-				on:mousedown={() => {
-					if (gameState === 'playing') isMouseDown = true;
-				}}
-			>
+				on:mousedown={() => { if (gameState === 'playing') isMouseDown = true; }}>
 				{#each grid as row, r (r)}
 					{#each row as cell, c (c)}
 						<button
@@ -737,27 +605,22 @@
 							{cell.isOpen ? 'bg-sub/10' : 'bg-sub/30 hover:bg-sub/50'}
 							{cell.isMine && cell.isOpen ? 'bg-error text-bg' : ''}
 							{cell.isMine && !cell.isOpen && gameState === 'finished' ? 'bg-error/50 opacity-50' : ''}
-							{hoveredCell?.r === cell.row && hoveredCell?.c === cell.col
-								? 'z-10 ring-2 ring-main/20 brightness-125'
-								: ''}"
-							on:click={() => handleClick(cell.row, cell.col)}
-							on:contextmenu|preventDefault={() => toggleFlag(cell.row, cell.col)}
-							on:mouseenter={() => (hoveredCell = { r: cell.row, c: cell.col })}
-							on:mouseleave={() => (hoveredCell = null)}
+							
+							{(cursor.r === r && cursor.c === c) ? 'z-10 ring-2 ring-main/50 brightness-110' : ''}"
+
+							on:click={() => handleClick(r, c)}
+							on:contextmenu|preventDefault={() => toggleFlag(r, c)}
+							on:mouseenter={() => { cursor = { r, c }; }}
 						>
 							{#if cell.isOpen}
 								{#if cell.isMine}
 									<Bomb size={16} />
 								{:else if cell.neighborCount > 0}
-									<span
-										class={cell.neighborCount === 1
-											? 'text-blue-400'
-											: cell.neighborCount === 2
-												? 'text-green-400'
-												: cell.neighborCount === 3
-													? 'text-red-400'
-													: 'text-purple-400'}>{cell.neighborCount}</span
-									>
+									<span class={
+										cell.neighborCount === 1 ? 'text-blue-400' : 
+										cell.neighborCount === 2 ? 'text-green-400' : 
+										cell.neighborCount === 3 ? 'text-red-400' : 'text-purple-400'
+									}>{cell.neighborCount}</span>
 								{/if}
 							{:else if cell.isFlagged}
 								<span class="text-error"><Flag size={14} fill="currentColor" /></span>
@@ -770,13 +633,8 @@
 	{/if}
 
 	{#if showPalette}
-		<div
-			class="animate-in fade-in fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm duration-150"
-			on:mousedown|self={() => (showPalette = false)}
-		>
-			<div
-				class="mt-[15vh] flex max-h-[50vh] w-[450px] flex-col overflow-hidden rounded-lg border border-sub/20 bg-bg font-mono text-text shadow-2xl"
-			>
+		<div class="animate-in fade-in fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm duration-150" on:mousedown|self={() => (showPalette = false)}>
+			<div class="mt-[15vh] flex max-h-[50vh] w-[450px] flex-col overflow-hidden rounded-lg border border-sub/20 bg-bg font-mono text-text shadow-2xl">
 				<div class="flex items-center gap-3 border-b border-sub/10 p-3">
 					<Search size={14} class="text-main" />
 					<input
@@ -785,173 +643,83 @@
 						type="text"
 						placeholder={paletteView === 'root' ? 'Type to search...' : 'Search themes...'}
 						class="h-full w-full border-none bg-transparent text-xs text-text outline-none placeholder:text-sub/50"
-						on:keydown={(e) => {
-							if (e.key === 'Backspace' && searchQuery === '' && paletteView === 'themes') {
-								paletteView = 'root';
-							}
-						}}
+						on:keydown={(e) => { if (e.key === 'Backspace' && searchQuery === '' && paletteView === 'themes') paletteView = 'root'; }}
 					/>
-					{#if paletteView === 'themes'}
-						<span
-							class="rounded bg-sub/20 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-sub"
-							>Themes</span
-						>
-					{/if}
 				</div>
-
 				<div class="overflow-y-auto p-1.5">
 					{#if paletteView === 'root'}
 						{#each filteredCommands as cmd}
-							<button
-								class="group flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-xs transition-colors hover:bg-sub/10"
-								on:click={cmd.action}
-							>
+							<button class="group flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-xs transition-colors hover:bg-sub/10" on:click={cmd.action}>
 								<div class="flex items-center gap-3">
-									<svelte:component
-										this={cmd.icon}
-										size={12}
-										class="text-sub transition-colors group-hover:text-main"
-									/>
-									<span class="text-sub/80 transition-colors group-hover:text-text"
-										>{cmd.label}</span
-									>
+									<svelte:component this={cmd.icon} size={12} class="text-sub group-hover:text-main" />
+									<span class="text-sub/80 group-hover:text-text">{cmd.label}</span>
 								</div>
-								<ChevronRight
-									size={12}
-									class="text-sub/40 transition-colors group-hover:text-main"
-								/>
+								<ChevronRight size={12} class="text-sub/40 group-hover:text-main" />
 							</button>
 						{/each}
-						{#if filteredCommands.length === 0}
-							<div class="p-3 text-center text-[10px] italic text-sub opacity-50">
-								No commands found...
-							</div>
-						{/if}
 					{:else if paletteView === 'themes'}
 						{#each filteredThemes as theme}
-							<button
-								class="group flex w-full items-center justify-between rounded px-2 py-1 text-left text-xs transition-colors hover:bg-sub/10 {$currentTheme.name ===
-								theme.name
-									? 'bg-main/5'
-									: ''}"
-								on:click={() => {
-									$currentTheme = theme;
-									showPalette = false;
-								}}
-							>
-								<div class="flex items-center gap-3">
-									<div class="flex gap-1">
-										<div
-											class="h-2 w-2 rounded-full border border-white/10"
-											style="background-color: rgb({theme.colors.bg})"
-										></div>
-										<div
-											class="h-2 w-2 rounded-full border border-white/10"
-											style="background-color: rgb({theme.colors.main})"
-										></div>
-										<div
-											class="h-2 w-2 rounded-full border border-white/10"
-											style="background-color: rgb({theme.colors.error})"
-										></div>
-									</div>
-									<span
-										class="text-sub/80 transition-colors group-hover:text-text {$currentTheme.name ===
-										theme.name
-											? 'font-bold text-main'
-											: ''}"
-									>
-										{theme.label}
-									</span>
-								</div>
-								{#if $currentTheme.name === theme.name}
-									<span class="rounded bg-main/20 px-1.5 py-0 text-[9px] text-main">Active</span>
-								{/if}
+							<button class="group flex w-full items-center justify-between rounded px-2 py-1 text-left text-xs transition-colors hover:bg-sub/10" on:click={() => { $currentTheme = theme; showPalette = false; }}>
+								<span class="text-sub/80 group-hover:text-text">{theme.label}</span>
 							</button>
 						{/each}
-						{#if filteredThemes.length === 0}
-							<div class="p-3 text-center text-[10px] italic text-sub opacity-50">
-								No themes found...
-							</div>
-						{/if}
 					{/if}
-				</div>
-
-				<div
-					class="flex select-none justify-between border-t border-sub/10 bg-sub/5 p-1.5 px-3 text-[10px] text-sub"
-				>
-					<span>navigate with arrows</span>
-					<div class="flex gap-3">
-						<span><kbd class="rounded bg-sub/20 px-1">esc</kbd> close</span>
-						<span><kbd class="rounded bg-sub/20 px-1">↵</kbd> select</span>
-					</div>
 				</div>
 			</div>
 		</div>
 	{/if}
-
-	<div
-		class="fixed bottom-8 flex w-full justify-between px-8 font-mono text-xs text-sub opacity-40 transition-opacity duration-300 {gameState ===
-		'playing'
-			? 'opacity-0'
-			: 'opacity-100'}"
-	>
-		<div class="flex gap-6">
+{#if isSearchMode}
+		<div class="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-bottom-2">
+			<div class="flex items-center gap-2 rounded-full border border-main/20 bg-bg px-4 py-2 shadow-2xl">
+				<span class="font-bold text-main">/</span>
+				<span class="min-w-[10px] font-mono text-lg text-text">{searchTerm}</span>
+				<span class="animate-pulse text-main">_</span>
+			</div>
+		</div>
+	{/if}
+    <div class="fixed bottom-8 flex w-full justify-between items-end px-8 font-mono text-xs text-sub opacity-40 {gameState === 'playing' ? 'opacity-0' : 'opacity-100'}">
+		<div class="flex flex-col gap-2 items-start">
 			<div class="flex items-center gap-2">
-				<kbd class="rounded bg-sub/20 px-1.5 py-0.5 text-text">tab</kbd>
+				<kbd class="rounded bg-sub/20 px-1.5 py-0.5 text-text min-w-[2rem] text-center">tab</kbd>
 				<span>- restart</span>
 			</div>
+			
 			<div class="flex items-center gap-2">
-				<kbd class="rounded bg-sub/20 px-1.5 py-0.5 text-text">esc</kbd>
+				<kbd class="rounded bg-sub/20 px-1.5 py-0.5 text-text min-w-[2rem] text-center">enter</kbd>
+				<span>- reveal</span>
+			</div>
+			
+			<div class="flex items-center gap-2">
+				<kbd class="rounded bg-sub/20 px-1.5 py-0.5 text-text min-w-[2rem] text-center">space</kbd>
+				<span>- flag / chord</span>
+			</div>
+
+			<div class="flex items-center gap-2">
+				<kbd class="rounded bg-sub/20 px-1.5 py-0.5 text-text transition-all duration-100">
+					{#if vimBuffer.length > 0}
+						<span class="text-main font-bold">{vimBuffer}</span>
+					{:else}
+						vim
+					{/if}
+				</kbd>
+				<span>- motion</span>
+			</div>
+
+			<div class="flex items-center gap-2">
+				<kbd class="rounded bg-sub/20 px-1.5 py-0.5 text-text min-w-[2rem] text-center">/</kbd>
 				<span>- search</span>
 			</div>
-            <div class="flex times-center gap-2 text-main/80">
-                <kbd class="rounded bg-sub/20 px-1.5 py-0.5 text-text">space</kbd>
-                <span>- flag / chord</span>
-            </div>
 		</div>
 
-		<div class="flex gap-6">
-			<button
-				class="flex items-center gap-2 transition-colors hover:text-text"
-				on:click={openPalette}
-			>
-				<svg
-					xmlns="http://www.w3.org/2000/svg"
-					width="12"
-					height="12"
-					viewBox="0 0 24 24"
-					fill="none"
-					stroke="currentColor"
-					stroke-width="2"
-					stroke-linecap="round"
-					stroke-linejoin="round"
-					><circle cx="13.5" cy="6.5" r=".5" /><circle cx="17.5" cy="10.5" r=".5" /><circle
-						cx="8.5"
-						cy="7.5"
-						r=".5"
-					/><circle cx="6.5" cy="12.5" r=".5" /><path
-						d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"
-					/></svg
-				>
+		<div class="flex flex-col gap-2 items-end">
+			<button class="flex items-center gap-2 transition-colors hover:text-text" on:click={openPalette}>
 				<span>{$currentTheme.label}</span>
+				<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r=".5" /><circle cx="17.5" cy="10.5" r=".5" /><circle cx="8.5" cy="7.5" r=".5" /><circle cx="6.5" cy="12.5" r=".5" /><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z" /></svg>
 			</button>
 
 			<div class="flex cursor-default select-none items-center gap-2">
-				<svg
-					xmlns="http://www.w3.org/2000/svg"
-					width="12"
-					height="12"
-					viewBox="0 0 24 24"
-					fill="none"
-					stroke="currentColor"
-					stroke-width="2"
-					stroke-linecap="round"
-					stroke-linejoin="round"
-					><rect width="20" height="8" x="2" y="14" rx="2" /><path
-						d="M6 14V6a2 2 0 0 1 2-2h2"
-					/><path d="M18 9h2a2 2 0 0 1 2 2v11l-3-3" /><path d="M14 6a2 2 0 0 0-2-2" /></svg
-				>
 				<span>v1.0.0</span>
+				<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="8" x="2" y="14" rx="2" /><path d="M6 14V6a2 2 0 0 1 2-2h2" /><path d="M18 9h2a2 2 0 0 1 2 2v11l-3-3" /><path d="M14 6a2 2 0 0 0-2-2" /></svg>
 			</div>
 		</div>
 	</div>
