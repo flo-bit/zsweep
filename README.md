@@ -15,17 +15,27 @@
 <h3 align="center">zsweep</h3>
 
   <p align="center">
+  <em>
     A minimalist, keyboard-centric Minesweeper experience designed for flow state.
-    <br />
-    <a href="https://zsweep.com"><strong>Play the Beta »</strong></a>
-    <br />
-    <br />
-    <a href="https://zsweep.com">View Demo</a>
-    &middot;
-    <a href="https://github.com/oug-t/zsweep/issues/new?labels=bug&template=bug-report.md">Report Bug</a>
-    &middot;
-    <a href="https://github.com/oug-t/zsweep/issues/new?labels=enhancement&template=feature-request.md">Request Feature</a>
-  </p>
+  </em>
+</p>
+
+<p align="center">
+  <a href="https://zsweep.com">
+    <strong>▶ PLAY BETA</strong>
+  </a>
+</p>
+<br />
+
+<p align="center">
+  <a href="https://github.com/oug-t/zsweep/issues/new?labels=bug&template=bug-report.md">
+    Report Bug
+  </a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/oug-t/zsweep/issues/new?labels=enhancement&template=feature-request.md">
+    Request Feature
+  </a>
+</p>
 </div>
 
 <details>
@@ -54,7 +64,7 @@
 
 ## About The Project
 
-[![zsweep Screenshot](static/docs/screenshot.png)](https://zsweep.com)
+[![zsweep Screenshot](static/images/screenshot.png)](https://zsweep.com)
 
 **zsweep** is a modern reimagining of Minesweeper, inspired by the "Monkeytype" aesthetic. It strips away the clutter of traditional Windows-95 clones to focus purely on speed, accuracy, and flow state.
 
@@ -67,12 +77,13 @@ Whether you are a competitive sweeper or just looking for a zen break, zsweep is
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-### Built With
+## Built With
 
-* [![Svelte][Svelte.dev]][Svelte-url]
-* [![TailwindCSS][TailwindCSS]][Tailwind-url]
-* [![Supabase][Supabase]][Supabase-url]
-* [![TypeScript][TypeScript]][TypeScript-url]
+- [![Svelte][svelte-badge]][svelte-url]
+- [![TailwindCSS][tailwind-badge]][tailwind-url]
+- [![Supabase][supabase-badge]][supabase-url]
+- [![TypeScript][ts-badge]][ts-url]
+
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -209,3 +220,16 @@ Project Link: https://github.com/oug-t/zsweep
 
 [license-shield]: https://img.shields.io/github/license/oug-t/zsweep.svg?style=flat
 [license-url]: https://github.com/oug-t/zsweep/blob/main/LICENSE
+
+<!-- Badges -->
+[svelte-badge]: https://img.shields.io/badge/Svelte-FF3E00?style=flat&logo=svelte&logoColor=white
+[tailwind-badge]: https://img.shields.io/badge/TailwindCSS-06B6D4?style=flat&logo=tailwindcss&logoColor=white
+[supabase-badge]: https://img.shields.io/badge/Supabase-3ECF8E?style=flat&logo=supabase&logoColor=white
+[ts-badge]: https://img.shields.io/badge/TypeScript-3178C6?style=flat&logo=typescript&logoColor=white
+
+<!-- Links -->
+[svelte-url]: https://svelte.dev
+[tailwind-url]: https://tailwindcss.com
+[supabase-url]: https://supabase.com
+[ts-url]: https://www.typescriptlang.org
+
