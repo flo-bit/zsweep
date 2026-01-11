@@ -904,6 +904,10 @@
 				<kbd class="rounded bg-sub/20 px-1.5 py-0.5 text-text">esc</kbd>
 				<span>- search</span>
 			</div>
+            <div class="flex times-center gap-2 text-main/80">
+                <kbd class="rounded bg-sub/20 px-1.5 py-0.5 text-text">space</kbd>
+                <span>- flag / chord</span>
+            </div>
 		</div>
 
 		<div class="flex gap-6">
